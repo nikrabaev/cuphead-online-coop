@@ -25,6 +25,12 @@ namespace CupheadOnline.Sync
     ///   secondary NAME               host: give both players Weapon NAME as secondary weapon (in memory, not saved)
     ///   invincible                   host: both players stop taking damage (the game's debug toggle; reset per level)
     ///   shot NAME                    save a screenshot to CUPHEAD_ONLINE_SHOTS/ROLE_NAME.png
+    ///   burst NAME COUNT FPS         COUNT screenshots at FPS, starting on the next 10 s wall-clock boundary
+    ///   align [PERIOD]               wait for the next PERIOD-second wall-clock mark (default 30) to sync two instances
+    ///   burstbg NAME COUNT FPS       capture like burst, starting now, while the script keeps running
+    ///   menu on|off                  show or hide the F8 online menu
+    ///   down BUTTON / up BUTTON      press / release a button and keep it that way
+    ///   stick X Y                    set the movement stick and keep it there
     ///   state                        log scene / player / mirror state
     ///   dump                         log every camera, renderer, canvas and UI graphic
     ///   fxdump                       log particle systems, sprite/UI masks and per-renderer material state
@@ -38,8 +44,11 @@ namespace CupheadOnline.Sync
         private static PadState pad;
         private static string role = "offline";
 
+        private static MonoBehaviour runnerBehaviour;
+
         public static void Start(MonoBehaviour runner)
         {
+            runnerBehaviour = runner;
             string path = Environment.GetEnvironmentVariable("CUPHEAD_ONLINE_SCRIPT");
             if (string.IsNullOrEmpty(path)) return;
             if (!File.Exists(path))
@@ -191,6 +200,59 @@ namespace CupheadOnline.Sync
                         Shot(a.Length > 1 ? a[1] : "shot");
                         yield return null;
                         break;
+                    case "down":
+                    {
+                        int id = Button(a[1]);
+                        if (id >= 0) { pad.Held |= 1u << id; pad.Presses[id]++; }
+                        break;
+                    }
+                    case "up":
+                    {
+                        int id = Button(a[1]);
+                        if (id >= 0) pad.Held &= ~(1u << id);
+                        break;
+                    }
+                    case "stick":
+                        pad.Axes[0] = F(a, 1, 0f);
+                        pad.Axes[1] = F(a, 2, 0f);
+                        break;
+                    case "align":
+                    {
+                        // align [PERIOD]: wait for the next multiple of PERIOD seconds of wall-clock time (default 30)
+                        long period = (long)(F(a, 1, 30f) * TimeSpan.TicksPerSecond);
+                        long nowTicks = DateTime.UtcNow.Ticks;
+                        DateTime target = new DateTime(nowTicks - nowTicks % period + period, DateTimeKind.Utc);
+                        while (DateTime.UtcNow < target) yield return null;
+                        Log("aligned at " + target.ToString("HH:mm:ss"));
+                        break;
+                    }
+                    case "burstbg":
+                        // burstbg NAME COUNT FPS: like burst, but starts now and runs while the script continues
+                        runnerBehaviour.StartCoroutine(Burst(a.Length > 1 ? a[1] : "burst", (int)F(a, 2, 30f), F(a, 3, 10f), DateTime.UtcNow));
+                        break;
+                    case "menu":
+                        CupheadOnline.UI.Overlay.Visible = a.Length < 2 || a[1] != "off";
+                        break;
+                    case "burst":
+                    {
+                        // burst NAME COUNT FPS: frames start on the next 10-second wall-clock boundary, so a host and a
+                        // client on the same machine capture the same moments (for side-by-side comparisons).
+                        string name = a.Length > 1 ? a[1] : "burst";
+                        int count = (int)F(a, 2, 30f);
+                        float interval = 1f / Mathf.Max(1f, F(a, 3, 10f));
+                        DateTime now = DateTime.UtcNow;
+                        DateTime start = new DateTime(now.Ticks - now.Ticks % TimeSpan.TicksPerSecond, DateTimeKind.Utc).AddSeconds(10 - now.Second % 10);
+                        while (DateTime.UtcNow < start) yield return null;
+                        for (int k = 0; k < count; k++)
+                        {
+                            DateTime due = start.AddSeconds(k * interval);
+                            while (DateTime.UtcNow < due) yield return null;
+                            Shot(name + "_" + k.ToString("000"));
+                            yield return null;
+                        }
+                        Log("burst " + name + " done");
+                        break;
+                    }
                     case "state":
                         Log(State());
                         break;
@@ -210,6 +272,19 @@ namespace CupheadOnline.Sync
                 }
             }
             Log("script finished");
+        }
+
+        private static IEnumerator Burst(string name, int count, float fps, DateTime start)
+        {
+            float interval = 1f / Mathf.Max(1f, fps);
+            for (int k = 0; k < count; k++)
+            {
+                DateTime due = start.AddSeconds(k * interval);
+                while (DateTime.UtcNow < due) yield return null;
+                Shot(name + "_" + k.ToString("000"));
+                yield return null;
+            }
+            Log("burst " + name + " done");
         }
 
         private static float F(string[] a, int i, float fallback)

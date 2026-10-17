@@ -23,4 +23,5 @@ This repository contains only the mod's own source code. Nothing from Cuphead is
 Cuphead is © StudioMDHR Entertainment Inc. This is an unofficial, fan-made mod. It is not affiliated
 with, endorsed or sponsored by StudioMDHR. It requires a legitimate copy of the game. The build
 references the player's own installed game assemblies; no game files, decompiled game code or game
-assets are part of this repository or its releases.
+assets are part of this repository or its releases. The screenshots in `docs/images` show Cuphead gameplay
+(© StudioMDHR) recorded with the mod, to illustrate what it does.
