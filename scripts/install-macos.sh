@@ -51,18 +51,22 @@ ask() {
 
 # ---------------------------------------------------------------------------------------------- locate the game
 find_game() {
-  local vdf="$STEAM_DIR/steamapps/libraryfolders.vdf" lib
-  {
-    echo "$STEAM_DIR"
-    if [ -f "$vdf" ]; then
-      sed -n 's/^[[:space:]]*"path"[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$vdf" | sed 's/\\\\/\\/g'
-    fi
-  } | while IFS= read -r lib; do
-    if [ -d "$lib/steamapps/common/Cuphead/Cuphead.app" ]; then
+  # No pipeline here: stopping early would SIGPIPE the producer and, with pipefail, abort the script.
+  local vdf="$STEAM_DIR/steamapps/libraryfolders.vdf" libs lib
+  libs="$STEAM_DIR"
+  if [ -f "$vdf" ]; then
+    libs="$libs
+$(sed -n 's/^[[:space:]]*"path"[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$vdf" | sed 's/\\\\/\\/g')"
+  fi
+  while IFS= read -r lib; do
+    if [ -n "$lib" ] && [ -d "$lib/steamapps/common/Cuphead/Cuphead.app" ]; then
       echo "$lib/steamapps/common/Cuphead"
-      break
+      return 0
     fi
-  done
+  done <<LIBS
+$libs
+LIBS
+  return 0
 }
 
 if [ -z "$GAME_DIR" ]; then GAME_DIR="$(find_game)"; fi
