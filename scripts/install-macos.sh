@@ -13,7 +13,8 @@
 # and sets Cuphead's Steam launch options so Steam starts the game with the mod. Nothing else is installed.
 set -euo pipefail
 
-RELEASE_URL="${CUPHEAD_ONLINE_RELEASE_URL:-https://github.com/nikrabaev/cuphead-online-coop/releases/latest/download}"
+REPO="nikrabaev/cuphead-online-coop"
+RELEASE_URL="${CUPHEAD_ONLINE_RELEASE_URL:-}"
 BEPINEX_URL="https://github.com/BepInEx/BepInEx/releases/download/v5.4.23.5/BepInEx_macos_universal_5.4.23.5.zip"
 BEPINEX_SHA256="01c2ae782eb016dfd6c345a18dbd2dcafffb3d9d318449d6486689f426b4a323"
 APP_ID="268910"
@@ -85,6 +86,7 @@ if pgrep -f "Cuphead.app/Contents/MacOS/Cuphead" >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------------------------- downloads
+TAG=""
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -102,7 +104,18 @@ else
   [ "$(sha256 "$TMP/bepinex.zip")" = "$BEPINEX_SHA256" ] || die "BepInEx download failed its checksum; nothing was changed."
 fi
 
-say "Downloading the mod"
+# Pin one release for every file: "latest/download/..." links are cached separately and can briefly point at
+# different releases right after a new one is published.
+if [ -z "$RELEASE_URL" ]; then
+  TAG="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1 || true)"
+  if [ -n "$TAG" ]; then
+    RELEASE_URL="https://github.com/$REPO/releases/download/$TAG"
+  else
+    RELEASE_URL="https://github.com/$REPO/releases/latest/download"
+  fi
+fi
+
+say "Downloading the mod${TAG:+ $TAG}"
 download "$RELEASE_URL/CupheadOnline.dll" "$TMP/CupheadOnline.dll"
 download "$RELEASE_URL/SHA256SUMS.txt" "$TMP/SHA256SUMS.txt"
 EXPECTED="$(awk '$2 == "CupheadOnline.dll" {print $1}' "$TMP/SHA256SUMS.txt")"

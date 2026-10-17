@@ -12,7 +12,8 @@
     $ProgressPreference = 'SilentlyContinue'   # Invoke-WebRequest is very slow with the progress bar on PowerShell 5.1
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
-    $ReleaseUrl = if ($env:CUPHEAD_ONLINE_RELEASE_URL) { $env:CUPHEAD_ONLINE_RELEASE_URL } else { 'https://github.com/nikrabaev/cuphead-online-coop/releases/latest/download' }
+    $Repo = 'nikrabaev/cuphead-online-coop'
+    $ReleaseUrl = $env:CUPHEAD_ONLINE_RELEASE_URL
     $BepInEx = @{
         x64 = @{ Url = 'https://github.com/BepInEx/BepInEx/releases/download/v5.4.23.5/BepInEx_win_x64_5.4.23.5.zip'; Sha256 = '82f9878551030f54657792c0740d9d51a09500eeae1fba21106b0c441e6732c4' }
         x86 = @{ Url = 'https://github.com/BepInEx/BepInEx/releases/download/v5.4.23.5/BepInEx_win_x86_5.4.23.5.zip'; Sha256 = '37651c79e40d6f909572a4f461ac25350bb3ef8fe7fbd29f1aa8791a33b84c82' }
@@ -94,7 +95,14 @@
                 Assert-Sha256 $zip $BepInEx[$arch].Sha256 'BepInEx download'
             }
 
-            Say 'Downloading the mod'
+            # Pin one release for every file: "latest/download/..." links are cached separately and can briefly
+            # point at different releases right after a new one is published.
+            $tag = $null
+            if (-not $ReleaseUrl) {
+                try { $tag = (Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -UseBasicParsing).tag_name } catch { }
+                $ReleaseUrl = if ($tag) { "https://github.com/$Repo/releases/download/$tag" } else { "https://github.com/$Repo/releases/latest/download" }
+            }
+            Say ("Downloading the mod" + $(if ($tag) { " $tag" } else { '' }))
             $dll = Join-Path $tmp 'CupheadOnline.dll'
             $sums = Join-Path $tmp 'SHA256SUMS.txt'
             Get-Download "$ReleaseUrl/CupheadOnline.dll" $dll
