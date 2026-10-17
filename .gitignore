@@ -1,0 +1,21 @@
+# Build output
+bin/
+obj/
+*.user
+.vs/
+.idea/
+
+# Never commit anything from the game or from decompiling it
+*.dll
+Assembly-CSharp*/
+decomp/
+*.sav
+
+# Local test artifacts
+*.log
+shots/
+*.png
+!docs/**/*.png
+steam_appid.txt
+.DS_Store
+dist/
