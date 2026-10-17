@@ -16,7 +16,7 @@ You play Cuphead on your own save. Your friend joins as Mugman from their own co
 
 <br>
 
-**[Install](#-install)** · **[How to play](#-how-to-play)** · **[Uninstall](#-uninstall)** · **[FAQ](#-faq)** · **[How it works](#-how-it-works)**
+**[Install](#-install)** · **[How to play](#-how-to-play)** · **[Uninstall](#%EF%B8%8F-uninstall)** · **[FAQ](#-faq)** · **[How it works](#-how-it-works)**
 
 </div>
 
