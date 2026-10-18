@@ -28,6 +28,19 @@ namespace CupheadOnline
         public static ConfigEntry<string> LastSteamId;
         public static ConfigEntry<KeyCode> MenuKey;
         public static ConfigEntry<int> SendInterval;
+        public static ConfigEntry<string> LastPartnerId;
+        public static ConfigEntry<string> LastPartnerName;
+        public static ConfigEntry<bool> BackupSaves;
+        public static ConfigEntry<int> BackupsToKeep;
+        public static ConfigEntry<bool> CheckForUpdates;
+
+        public const string RepoUrl = "https://github.com/nikrabaev/cuphead-online-coop";
+
+        /// <summary>Patch classes that failed to apply (the game changed under the mod); shown in the menu.</summary>
+        public static readonly System.Collections.Generic.List<string> HookFailures = new System.Collections.Generic.List<string>();
+
+        /// <summary>Scripted or autostarted runs (two instances on one machine) must keep running while unfocused.</summary>
+        public static bool AlwaysRunInBackground { get; private set; }
 
         private Harmony harmony;
         private float dumpAt;
@@ -45,6 +58,11 @@ namespace CupheadOnline
             LastSteamId = Config.Bind("Network", "LastSteamId", "", "Last host SteamID64 joined via Steam.");
             MenuKey = Config.Bind("General", "MenuKey", KeyCode.F8, "Key that opens the online menu.");
             SendInterval = Config.Bind("Network", "SendInterval", 1, "Host: send world state every N frames (1 = 60 Hz, 2 = 30 Hz for slow connections).");
+            LastPartnerId = Config.Bind("Network", "LastPartnerSteamId", "", "SteamID64 of the last person you played with over Steam (for 'Play with ...').");
+            LastPartnerName = Config.Bind("Network", "LastPartnerName", "", "Their Steam name when you last played.");
+            BackupSaves = Config.Bind("Saves", "BackupSaves", true, "Copy your Cuphead saves to BepInEx/CupheadOnline/SaveBackups when an online session starts.");
+            BackupsToKeep = Config.Bind("Saves", "BackupsToKeep", 10, "How many save backups to keep (oldest are deleted).");
+            CheckForUpdates = Config.Bind("Updates", "CheckForUpdates", true, "Once per launch, ask GitHub whether a newer release of the mod is out.");
 
             if (DebugDump.Enabled)
             {
@@ -52,17 +70,42 @@ namespace CupheadOnline
                 BepInEx.Logging.Logger.Listeners.Add(new DiskLogListener("CupheadOnline-" + System.Diagnostics.Process.GetCurrentProcess().Id + ".log", LogLevel.All));
             }
             harmony = new Harmony(Guid);
-            harmony.PatchAll(typeof(Plugin).Assembly);
+            PatchAll();
             AudioSync.Install(harmony);
             HostSync.Install();
             ClientMirror.Install();
             SteamSupport.Install();
-            Application.runInBackground = true;
+            AlwaysRunInBackground = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CUPHEAD_ONLINE")) ||
+                !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CUPHEAD_ONLINE_SCRIPT"));
+            if (AlwaysRunInBackground) Application.runInBackground = true;
             StartCoroutine(EndOfFrame());
             StartCoroutine(AutoStart());
+            StartCoroutine(UpdateCheck.Run());
             TestDriver.Start(this);
             UnityEngine.SceneManagement.SceneManager.sceneLoaded += (scene, mode) => { if (scene.name != HostSync.LoadHelperScene) dumpAt = Time.realtimeSinceStartup + 4f; };
-            Log.LogInfo(DisplayName + " " + Version + " loaded. Press " + MenuKey.Value + " for the online menu.");
+            Log.LogInfo(DisplayName + " " + Version + " loaded. Press " + MenuKey.Value + " for the online menu." +
+                (HookFailures.Count > 0 ? " " + HookFailures.Count + " game hook(s) failed: " + string.Join(", ", HookFailures.ToArray()) : ""));
+        }
+
+        /// <summary>
+        /// Harmony's PatchAll stops at the first patch class whose target is missing, leaving every later one
+        /// unapplied. Patch class by class instead, so one hook broken by a game update disables only its feature,
+        /// and the menu can say so. (scripts/check-hooks.sh catches the same problem at build time.)
+        /// </summary>
+        private void PatchAll()
+        {
+            foreach (Type type in AccessTools.GetTypesFromAssembly(typeof(Plugin).Assembly))
+            {
+                try
+                {
+                    harmony.CreateClassProcessor(type).Patch();
+                }
+                catch (Exception ex)
+                {
+                    HookFailures.Add(type.Name);
+                    Log.LogError("Could not hook the game (" + type.FullName + "): " + (ex.InnerException ?? ex).Message);
+                }
+            }
         }
 
         private void Update()
@@ -114,14 +157,20 @@ namespace CupheadOnline
         private IEnumerator AutoStart()
         {
             string spec = Environment.GetEnvironmentVariable("CUPHEAD_ONLINE");
-            foreach (string arg in Environment.GetCommandLineArgs())
+            string[] args = Environment.GetCommandLineArgs();
+            foreach (string arg in args)
             {
                 if (arg.StartsWith("--online=", StringComparison.Ordinal)) spec = arg.Substring(9);
             }
+            // Steam starts the game with "+connect_lobby ID" when an invite (or a friend's "Join Game") is accepted
+            // while Cuphead is closed.
+            ulong launchLobby = string.IsNullOrEmpty(spec) ? SteamSupport.ParseConnectLobby(args) : 0;
+            if (launchLobby != 0) spec = "steamlobby:" + launchLobby;
             if (string.IsNullOrEmpty(spec)) yield break;
             float deadline = Time.realtimeSinceStartup + 30f;
             while (UnityEngine.SceneManagement.SceneManager.GetActiveScene().name != "scene_title" && Time.realtimeSinceStartup < deadline) yield return null;
             yield return new WaitForSeconds(2f);
+            while (launchLobby != 0 && !SteamSupport.Available && Time.realtimeSinceStartup < deadline + 15f) yield return null;
             Log.LogInfo("Autostart: " + spec);
             try
             {
@@ -129,16 +178,22 @@ namespace CupheadOnline
                 switch (parts[0])
                 {
                     case "host":
-                        Session.StartHost(UdpTransport.Host(parts.Length > 1 ? int.Parse(parts[1]) : Port.Value), PlayerName.Value);
+                        int hostPort = parts.Length > 1 ? int.Parse(parts[1]) : Port.Value;
+                        Session.StartHost(() => UdpTransport.Host(hostPort), PlayerName.Value);
                         break;
                     case "steamhost":
                         SteamSupport.HostViaSteam();
                         break;
                     case "join":
-                        Session.StartClient(UdpTransport.Connect(parts[1], parts.Length > 2 ? int.Parse(parts[2]) : Port.Value), PlayerName.Value);
+                        string joinHost = parts[1];
+                        int joinPort = parts.Length > 2 ? int.Parse(parts[2]) : Port.Value;
+                        Session.StartClient(() => UdpTransport.Connect(joinHost, joinPort), PlayerName.Value);
                         break;
                     case "steamjoin":
                         SteamSupport.JoinViaSteam(ulong.Parse(parts[1]));
+                        break;
+                    case "steamlobby":
+                        SteamSupport.JoinLobby(ulong.Parse(parts[1]));
                         break;
                     default:
                         Log.LogWarning("Unknown autostart spec " + spec);

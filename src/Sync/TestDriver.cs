@@ -29,6 +29,10 @@ namespace CupheadOnline.Sync
     ///   align [PERIOD]               wait for the next PERIOD-second wall-clock mark (default 30) to sync two instances
     ///   burstbg NAME COUNT FPS       capture like burst, starting now, while the script keeps running
     ///   menu on|off                  show or hide the F8 online menu
+    ///   netdrop SEC                  drop all network traffic, both ways, for SEC seconds (simulates a lost link)
+    ///   waitdrop [TIMEOUT]           wait until the session notices the link is down and starts reconnecting
+    ///   waitlink [TIMEOUT]           wait until the session is connected again (after a drop)
+    ///   expect paused|running        host: check whether the game is paused (e.g. by the partner-disconnected prompt)
     ///   down BUTTON / up BUTTON      press / release a button and keep it that way
     ///   stick X Y                    set the movement stick and keep it there
     ///   state                        log scene / player / mirror state
@@ -233,6 +237,30 @@ namespace CupheadOnline.Sync
                     case "menu":
                         CupheadOnline.UI.Overlay.Visible = a.Length < 2 || a[1] != "off";
                         break;
+                    case "netdrop":
+                        Connection.TestDropUntil = DateTime.UtcNow.AddSeconds(F(a, 1, 15f)).Ticks;
+                        break;
+                    case "waitdrop":
+                    {
+                        float until = Time.realtimeSinceStartup + F(a, 1, 30f);
+                        while (!Session.Reconnecting && Time.realtimeSinceStartup < until) yield return null;
+                        Log(Session.Reconnecting ? "PASS reconnecting (" + Session.Status + ")" : "FAIL no drop noticed: " + Session.Status);
+                        break;
+                    }
+                    case "waitlink":
+                    {
+                        float until = Time.realtimeSinceStartup + F(a, 1, 60f);
+                        while (Session.State != LinkState.Connected && Time.realtimeSinceStartup < until) yield return null;
+                        Log(Session.State == LinkState.Connected ? "PASS link up (" + Session.Status + ")" : "FAIL link still down: " + Session.Status);
+                        break;
+                    }
+                    case "expect":
+                    {
+                        bool paused = PauseManager.state == PauseManager.State.Paused;
+                        bool want = a.Length > 1 && a[1] == "paused";
+                        Log((paused == want ? "PASS " : "FAIL ") + "game is " + (paused ? "paused" : "running") + " (status: " + Session.Status + ")");
+                        break;
+                    }
                     case "burst":
                     {
                         // burst NAME COUNT FPS: frames start on the next 10-second wall-clock boundary, so a host and a

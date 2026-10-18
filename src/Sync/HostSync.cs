@@ -78,7 +78,6 @@ namespace CupheadOnline.Sync
         public static void OnClientJoined(Connection connection)
         {
             active = true;
-            Application.runInBackground = true;
             RemoteInput.ResetHost();
             RemoteInput.DriveHostPlayerTwo = true;
             Sprites.ResetSent();

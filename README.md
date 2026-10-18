@@ -29,11 +29,14 @@ You play Cuphead on your own save. Your friend joins as Mugman from their own co
 - **Real co-op, drawn natively.** The guest's game renders every sprite itself at full resolution. You watch the
   game, not a compressed video stream.
 - **Steam invites, no port forwarding.** Host through Steam and invite a friend from the overlay, or connect
-  directly by IP.
+  directly by IP. Invites work even if your friend hasn't started Cuphead yet, and **Play with *name*** invites the
+  person you played with last in one press.
+- **Survives a dropped connection.** If the link drops mid-fight, the host's game pauses with Cuphead's own
+  "Player 2, reconnect" prompt while the two games reconnect on their own, for up to a minute.
 - **The whole game.** World map, boss fights, run 'n gun levels, menus, cutscenes, the HUD, music and sound
   effects. Mugman joins exactly like a second local controller.
 - **Your save, your progress.** Everything is saved to the host's slot, as in local co-op. The guest's save files
-  are never touched.
+  are never touched, and both players' saves are backed up each time a session starts.
 - **One-line install and uninstall.** Downloads are verified against SHA-256 checksums. No developer tools needed.
 
 ## 🚀 Install
@@ -103,8 +106,9 @@ Cuphead isn't found, first run `$env:CUPHEAD_DIR = 'D:\SteamLibrary\steamapps\co
 
 1. **Both players** start Cuphead from Steam and press **F8** to open the online menu.
 2. **The host** chooses **Host via Steam** and then **Invite a Steam friend…** (or **Host by IP**).
-3. **The guest** accepts the Steam invite, or picks the host from the friends list in the F8 menu
-   (or enters `host-ip:27960`). The guest's screen now follows the host's game.
+3. **The guest** accepts the Steam invite (from inside Cuphead, Steam chat, or the friends list's *Join Game*, which
+   starts Cuphead if it's closed), or picks the host in the F8 menu (or enters `host-ip:27960`). The guest's screen
+   now follows the host's game.
 4. **The host** goes to the world map or a level. The guest presses any button and Mugman jumps in.
 
 <p align="center">
@@ -119,7 +123,8 @@ Cuphead isn't found, first run `$env:CUPHEAD_DIR = 'D:\SteamLibrary\steamapps\co
 | **Direct IP** | **Host by IP** (UDP port 27960; forward it, or use Tailscale, ZeroTier or a LAN) | Enter `host-ip:27960` and **Join** |
 
 The guest uses their own keyboard or controller as usual. Both players need the same game and mod version; the
-mod checks this when joining.
+mod checks this when joining. Next time, the F8 menu offers **Host & invite *name*** (or **Join *name*** if they
+are already hosting) for the person you last played with over Steam.
 
 ## 🗑️ Uninstall
 
@@ -180,11 +185,38 @@ starts to feel like Remote Play. The F8 menu shows the current round trip.
 </details>
 
 <details>
+<summary><b>What happens if the connection drops?</b></summary>
+
+<br>
+
+After about 12 seconds without packets, both games start reconnecting by themselves. The host's game pauses with
+Cuphead's own "reconnect controller" prompt for player 2, and the guest's screen holds the last frame. When the link
+comes back, the prompt closes and play continues where it stopped (in the same level, without reloading). If it
+isn't back within a minute, the session ends. Leaving on purpose (Disconnect, quitting the game) ends it straight
+away.
+</details>
+
+<details>
+<summary><b>Does the mod connect to anything besides my friend?</b></summary>
+
+<br>
+
+Once per launch it asks GitHub's public API for the latest release of this mod, so the F8 menu can tell you when an
+update is out. Nothing about you is sent. Turn it off with `CheckForUpdates = false` under `[Updates]` in
+`BepInEx/config/dev.cupheadonline.mod.cfg`.
+</details>
+
+<details>
 <summary><b>Where is progress saved?</b></summary>
 
 <br>
 
 To the host's save slot, exactly like local co-op. While connected, the mod never writes to the guest's save files.
+
+As a safety net, each player's Cuphead saves are copied to `BepInEx/CupheadOnline/SaveBackups/<date-time>/` in the
+Cuphead folder when a session starts (unchanged saves aren't copied again; the newest 10 are kept). To restore one,
+quit Cuphead and copy its `.sav` files back to `~/Library/Application Support/unity.Studio MDHR.Cuphead/Cuphead/`
+on macOS or `%AppData%\Cuphead\` on Windows.
 </details>
 
 <details>
@@ -296,21 +328,30 @@ the game is copied into this repository.
 **Testing.** `CUPHEAD_ONLINE_SCRIPT=file` runs a scripted end-to-end test inside the game: on the host it plays
 player 1, on the guest its presses travel the real network path as player 2. See `src/Sync/TestDriver.cs` for the
 commands (`anykey`, `tap`, `hold`, `move`, `waitscene`, `waitp2`, `level`, `invincible`, `align`, `burst`, `shot`,
-`state`, `fxdump`, …). `CUPHEAD_ONLINE_SHOTS=dir` saves screenshots and `CUPHEAD_ONLINE_DEBUG=1` writes scene and
+`state`, `fxdump`, `netdrop` to cut the link for a few seconds, `waitdrop` / `waitlink` / `expect paused` to check
+reconnecting, …). `CUPHEAD_ONLINE_SHOTS=dir` saves screenshots and `CUPHEAD_ONLINE_DEBUG=1` writes scene and
 renderer dumps to `BepInEx/LogOutput.log`. Two instances can run on one Mac (host plus `join:127.0.0.1:27960`).
 Starting the game outside Steam's launcher like this needs a `steam_appid.txt` containing `268910` in the Cuphead
 folder, for local testing only (Steam must still be running and own the game); don't ship that file to players.
 The screenshots in this README were made this way.
 
+**Hook check.** Every build runs `tools/HookCheck` against the game assemblies it was built with: it checks that each
+`[HarmonyPatch]` target and each constant `AccessTools` lookup (`Method`, `Field`, `Property`, `TypeByName`, …) still
+exists, and fails the build if not, so a Cuphead update can't silently break a hook. Skip it with
+`-p:CheckHooks=false`. At runtime the mod also patches class by class: a hook that fails disables only its feature,
+and the F8 menu lists it.
+
 **Autostart and config.** `CUPHEAD_ONLINE=host`, `host:PORT`, `steamhost`, `join:HOST:PORT` or
-`steamjoin:STEAMID64` as an environment variable (or `--online=...` as a game argument) connects on startup.
-Settings live in `BepInEx/config/dev.cupheadonline.mod.cfg` (player name, port, menu key, and `SendInterval = 2` to
-halve the host's upload on slow connections).
+`steamjoin:STEAMID64` as an environment variable (or `--online=...` as a game argument) connects on startup; Steam's
+own `+connect_lobby LOBBYID` argument (from an invite accepted while Cuphead was closed) joins that lobby.
+Settings live in `BepInEx/config/dev.cupheadonline.mod.cfg` (player name, port, menu key, `SendInterval = 2` to
+halve the host's upload on slow connections, `[Saves]` backups, `[Updates] CheckForUpdates`).
 
 ```
 src/Plugin.cs             BepInEx entry, config, frame loop, autostart
 src/Net/                  Transport (UDP, Steam P2P), Connection (reliability), Session, SteamLobby, Protocol
 src/Net/SteamSupport.cs   guarded entry point for Steam features (game builds without Steam still load)
+src/Net/UpdateCheck.cs    once-per-launch latest-release check
 src/Sync/RemoteInput.cs   PadState / VirtualPad, Rewired patches
 src/Sync/HostSync.cs      host capture: sprites, sprite masks, cameras, UGUI (+ mask clipping)
 src/Sync/ClientMirror.cs  guest: scene load + freeze, mirrored renderers, cameras, UI
@@ -318,9 +359,11 @@ src/Sync/MaterialSync.cs  runtime material parameters (host capture, guest clone
 src/Sync/AudioSync.cs     AudioManager / PauseManager call replication
 src/Sync/Assets.cs        cross-process asset identity (sprites, materials, fonts, atlases)
 src/Sync/SteamFix.cs      SteamManager persistence fix
+src/Sync/SaveBackups.cs   save backups when a session starts
 src/Sync/TestDriver.cs    scripted end-to-end tests
 src/UI/Overlay.cs         F8 menu
 scripts/                  player installers/uninstallers, release.sh, dev-install.sh
+tools/HookCheck/          build-time check of hook targets against the game assemblies
 ```
 </details>
 

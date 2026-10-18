@@ -131,7 +131,6 @@ namespace CupheadOnline.Sync
         public static void OnConnected()
         {
             Mirroring = true;
-            Application.runInBackground = true;
             RemoteInput.BlockLocalGame = true;
             LoadedSerial = 0;
             targetSerial = 0;
@@ -142,6 +141,21 @@ namespace CupheadOnline.Sync
             MaterialSync.ClearClient();
             AudioSync.ClearWaiting();
             EnsureRoot();
+        }
+
+        /// <summary>
+        /// Back after a dropped link. The frozen scene stays loaded: the host resends everything (it treats us as
+        /// a fresh join), and if it is still in the same scene OnScene refills the mirror without reloading.
+        /// </summary>
+        public static void OnReconnected()
+        {
+            ClearMirror();
+            Sprites.ClearAll();
+            Materials.ClearAll();
+            Fonts.ClearAll();
+            TmpFonts.ClearAll();
+            MaterialSync.ClearClient();
+            AudioSync.ClearWaiting();
         }
 
         public static void OnSessionEnded()
@@ -384,6 +398,15 @@ namespace CupheadOnline.Sync
             targetMode = r.I32();
             r.Bool(); // host multiplayer flag (informational)
             ClearMirror();
+            if (!Loading && targetSerial == LoadedSerial && targetScene == LoadedScene && SceneManager.GetActiveScene().name == LoadedScene)
+            {
+                // Same scene as before a reconnect: it is still loaded and frozen, so just report ready.
+                Plugin.Log.LogInfo("Host is still in " + LoadedScene + "; mirroring it again");
+                NetWriter ready = new NetWriter(4);
+                ready.U16(LoadedSerial);
+                if (Session.Connection != null) Session.Connection.SendReliable(MsgType.SceneReady, ready);
+                return;
+            }
             Loading = true;
             loadPending = true;
             if (!SceneLoader.CurrentlyLoading) StartLoad();

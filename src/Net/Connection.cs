@@ -54,6 +54,9 @@ namespace CupheadOnline.Net
         public double RttSeconds { get; private set; }
         public bool TimedOut { get { return transport.HasPeer && lastReceive > 0 && Now - lastReceive > TimeoutSeconds; } }
         public bool HasReceived { get { return lastReceive > 0; } }
+        /// <summary>Test hook: drop all traffic in both directions until this time (DateTime.UtcNow ticks).</summary>
+        public static long TestDropUntil;
+        private static bool Dropping { get { return TestDropUntil != 0 && DateTime.UtcNow.Ticks < TestDropUntil; } }
         public IDatagramTransport Transport { get { return transport; } }
         public long BytesSent { get; private set; }
         public long BytesReceived { get; private set; }
@@ -87,13 +90,15 @@ namespace CupheadOnline.Net
             while (!disposed && transport.TryReceive(out data, out length))
             {
                 BytesReceived += length;
-                if (!Protocol.IsHello(data, length)) continue;
-                lastReceive = Now;
+                if (Dropping || !Protocol.IsHello(data, length)) continue;
                 reader.Reset(data, 3, length - 3);
                 try
                 {
                     ushort ack = reader.U16();
                     uint sack = reader.U32();
+                    // Acks for messages never sent come from a previous connection to the same peer; ignore those.
+                    if ((short)(ack - nextSendSeq) > 0) continue;
+                    lastReceive = Now;
                     ProcessAck(ack, sack);
                     while (reader.Remaining > 0 && !disposed)
                     {
@@ -149,7 +154,13 @@ namespace CupheadOnline.Net
         private void HandleReliable(ushort seq, MsgType type, byte[] data, int start, int len)
         {
             short delta = (short)(seq - nextRecvSeq);
-            if (delta < 0) return; // duplicate
+            if (delta < 0)
+            {
+                // Duplicate. A repeated Hello still goes up: the session tells a retransmit from a peer that lost
+                // us and redialled (a new connection nonce).
+                if (seq == 0 && type == MsgType.Hello) Dispatch(type, data, start, len);
+                return;
+            }
             if (delta > 0)
             {
                 if (delta > 2048) return; // nonsense; never buffer unboundedly
@@ -269,7 +280,7 @@ namespace CupheadOnline.Net
 
         private void EmitDatagram()
         {
-            transport.Send(datagram.Buffer, datagram.Length);
+            if (!Dropping) transport.Send(datagram.Buffer, datagram.Length);
             BytesSent += datagram.Length;
             lastSend = Now;
         }

@@ -40,6 +40,17 @@ namespace CupheadOnline.Net
         {
             return length >= HeaderSize && buffer[0] == Magic0 && buffer[1] == Magic1 && buffer[2] == Version;
         }
+
+        /// <summary>
+        /// A datagram that opens a new connection: its first message is the reliable Hello with sequence 0 (a new
+        /// Connection queues Hello before anything else, and reliables are written ahead of unreliables). Hosts adopt
+        /// a peer only on this, so stray packets from a peer's previous, dead connection can't claim the slot.
+        /// </summary>
+        public static bool IsConnectRequest(byte[] buffer, int length)
+        {
+            return IsHello(buffer, length) && length >= HeaderSize + 4 && buffer[HeaderSize] == 1 &&
+                buffer[HeaderSize + 1] == 0 && buffer[HeaderSize + 2] == 0 && buffer[HeaderSize + 3] == (byte)MsgType.Hello;
+        }
     }
 
     public sealed class NetWriter

@@ -19,6 +19,15 @@ namespace CupheadOnline.Net
             public string Name;
         }
 
+        public struct PartnerInfo
+        {
+            public ulong Id;
+            public string Name;
+            public bool Online;
+            public bool InCuphead;
+            public bool Hosting;
+        }
+
         private static int present = -1;
 
         /// <summary>Steamworks.NET and Cuphead's SteamManager are part of this game build.</summary>
@@ -49,6 +58,33 @@ namespace CupheadOnline.Net
         public static void JoinViaSteam(ulong hostId) { Require(); JoinCore(hostId); }
         public static void InviteFriend() { if (Present) Call(InviteCore); }
         public static void EndHosting() { if (Present) Call(EndHostingCore); }
+        public static void JoinLobby(ulong lobbyId) { Require(); JoinLobbyCore(lobbyId); }
+        public static void HostAndInvite(ulong friend) { Require(); HostAndInviteCore(friend); }
+        public static void Invite(ulong friend) { if (Present) Call(() => InviteUserCore(friend)); }
+
+        /// <summary>Remembers who we just played with over Steam, for "Play with NAME" in the menu.</summary>
+        public static void RememberPartner(IDatagramTransport transport) { if (Present) Call(() => RememberCore(transport)); }
+
+        /// <summary>The last Steam partner, if any (Id 0 otherwise).</summary>
+        public static PartnerInfo LastPartner()
+        {
+            ulong id;
+            if (!Present || !ulong.TryParse(Plugin.LastPartnerId.Value, out id) || id == 0) return new PartnerInfo();
+            return Call(() => PartnerCore(id), new PartnerInfo { Id = id, Name = Plugin.LastPartnerName.Value });
+        }
+
+        /// <summary>Lobby id from Steam's "+connect_lobby ID" launch/connect arguments, or 0.</summary>
+        public static ulong ParseConnectLobby(string[] args)
+        {
+            ulong id;
+            for (int i = 0; i < args.Length; i++)
+            {
+                string a = args[i].Trim();
+                if (a.StartsWith("+connect_lobby=", StringComparison.Ordinal) && ulong.TryParse(a.Substring(15), out id)) return id;
+                if (a == "+connect_lobby" && i + 1 < args.Length && ulong.TryParse(args[i + 1].Trim(), out id)) return id;
+            }
+            return 0;
+        }
 
         public static List<FriendInfo> HostingFriends()
         {
@@ -85,5 +121,10 @@ namespace CupheadOnline.Net
         [MethodImpl(MethodImplOptions.NoInlining)] private static void InviteCore() { SteamLobby.InviteFriend(); }
         [MethodImpl(MethodImplOptions.NoInlining)] private static void EndHostingCore() { SteamLobby.EndHosting(); }
         [MethodImpl(MethodImplOptions.NoInlining)] private static List<FriendInfo> FriendsCore() { return SteamLobby.HostingFriends(); }
+        [MethodImpl(MethodImplOptions.NoInlining)] private static void JoinLobbyCore(ulong id) { SteamLobby.JoinLobby(id); }
+        [MethodImpl(MethodImplOptions.NoInlining)] private static void HostAndInviteCore(ulong id) { SteamLobby.HostAndInvite(id); }
+        [MethodImpl(MethodImplOptions.NoInlining)] private static void InviteUserCore(ulong id) { SteamLobby.Invite(id); }
+        [MethodImpl(MethodImplOptions.NoInlining)] private static void RememberCore(IDatagramTransport t) { SteamLobby.RememberPartner(t); }
+        [MethodImpl(MethodImplOptions.NoInlining)] private static PartnerInfo PartnerCore(ulong id) { return SteamLobby.Partner(id); }
     }
 }

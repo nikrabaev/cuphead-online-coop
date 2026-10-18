@@ -18,6 +18,7 @@ namespace CupheadOnline.UI
         private static string error;
         private static List<SteamSupport.FriendInfo> friends = new List<SteamSupport.FriendInfo>();
         private static float lastFriendScan = -10f;
+        private static SteamSupport.PartnerInfo partner;
         private static float hintUntil = 12f;
         private static long lastBytesSent, lastBytesReceived;
         private static float lastRateSample;
@@ -83,6 +84,8 @@ namespace CupheadOnline.UI
             else if (Time.unscaledTime < hintUntil)
             {
                 text = "Online co-op: press " + Plugin.MenuKey.Value + " to host or join";
+                if (Plugin.HookFailures.Count > 0) text += "  ·  " + Plugin.HookFailures.Count + " game hook(s) failed, see menu";
+                else if (UpdateCheck.NewerVersion != null) text += "  ·  v" + UpdateCheck.NewerVersion + " is out";
             }
             else return;
             if (badgeStyle == null) badgeStyle = new GUIStyle(GUI.skin.box) { fontSize = 13, alignment = TextAnchor.MiddleLeft };
@@ -94,7 +97,24 @@ namespace CupheadOnline.UI
         private static void DrawWindow(int id)
         {
             GUILayout.Label("Status: " + Session.Status);
+            if (Session.Reconnecting)
+            {
+                GUILayout.Label("Reconnecting automatically. The session ends if the link isn't back within " + (int)Session.ReconnectWindow + " s.");
+            }
             if (!string.IsNullOrEmpty(error)) GUILayout.Label("<color=#ff8080>" + error + "</color>", Rich());
+            if (Plugin.HookFailures.Count > 0)
+            {
+                GUILayout.Label("<color=#ffb060>" + Plugin.HookFailures.Count + " game hook(s) failed to load (" + string.Join(", ", Plugin.HookFailures.ToArray()) +
+                    "), so parts of online play may not work. Is this mod version made for your Cuphead version?</color>", Rich());
+            }
+            if (UpdateCheck.NewerVersion != null)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("Version " + UpdateCheck.NewerVersion + " of the mod is out (you have " + Plugin.Version + "). Run the installer again to update.");
+                if (GUILayout.Button("Get v" + UpdateCheck.NewerVersion, GUILayout.Width(100))) Application.OpenURL(UpdateCheck.ReleaseUrl);
+                GUILayout.EndHorizontal();
+            }
+            RefreshFriends();
 
             if (Session.Role != Role.None)
             {
@@ -107,6 +127,12 @@ namespace CupheadOnline.UI
                 if (Session.Role == Role.Host && SteamSupport.HasLobby && GUILayout.Button("Invite a Steam friend…"))
                 {
                     SteamSupport.InviteFriend();
+                }
+                if (Session.Role == Role.Host && SteamSupport.HasLobby && Session.State != LinkState.Connected && partner.Id != 0 &&
+                    GUILayout.Button("Invite " + partner.Name + (partner.InCuphead ? " (in Cuphead)" : partner.Online ? " (online)" : " (offline)")))
+                {
+                    ulong friend = partner.Id;
+                    Guard(() => SteamSupport.Invite(friend));
                 }
                 if (Session.Role == Role.Host)
                 {
@@ -123,6 +149,23 @@ namespace CupheadOnline.UI
                 }
                 GUI.DragWindow();
                 return;
+            }
+
+            if (SteamSupport.Available && partner.Id != 0)
+            {
+                GUILayout.Space(4);
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("<b>Last played with " + partner.Name + "</b> (" + (partner.Hosting ? "hosting now" : partner.InCuphead ? "in Cuphead" : partner.Online ? "online" : "offline") + ")", Rich());
+                ulong friend = partner.Id;
+                if (partner.Hosting)
+                {
+                    if (GUILayout.Button("Join " + partner.Name, GUILayout.Width(170))) Guard(() => SteamSupport.JoinViaSteam(friend));
+                }
+                else if (GUILayout.Button("Host & invite " + partner.Name, GUILayout.Width(170)))
+                {
+                    Guard(() => SteamSupport.HostAndInvite(friend));
+                }
+                GUILayout.EndHorizontal();
             }
 
             GUILayout.Space(4);
@@ -143,7 +186,7 @@ namespace CupheadOnline.UI
                     int port;
                     if (!int.TryParse(portText, out port) || port <= 0 || port > 65535) throw new Exception("Invalid port");
                     Plugin.Port.Value = port;
-                    Session.StartHost(UdpTransport.Host(port), Plugin.PlayerName.Value);
+                    Session.StartHost(() => UdpTransport.Host(port), Plugin.PlayerName.Value);
                 });
             }
             GUILayout.EndHorizontal();
@@ -160,11 +203,6 @@ namespace CupheadOnline.UI
             }
             if (SteamSupport.Available)
             {
-                if (Time.unscaledTime - lastFriendScan > 2f)
-                {
-                    lastFriendScan = Time.unscaledTime;
-                    try { friends = SteamSupport.HostingFriends(); } catch { friends.Clear(); }
-                }
                 if (friends.Count == 0) GUILayout.Label("No Steam friends are hosting right now.");
                 foreach (SteamSupport.FriendInfo f in friends)
                 {
@@ -208,7 +246,7 @@ namespace CupheadOnline.UI
                         host = host.Substring(0, colon);
                     }
                     Plugin.LastAddress.Value = address.Trim();
-                    Session.StartClient(UdpTransport.Connect(host, port), Plugin.PlayerName.Value);
+                    Session.StartClient(() => UdpTransport.Connect(host, port), Plugin.PlayerName.Value);
                 });
             }
             GUILayout.EndHorizontal();
@@ -219,6 +257,14 @@ namespace CupheadOnline.UI
             Plugin.PlayerName.Value = GUILayout.TextField(Plugin.PlayerName.Value, 24);
             GUILayout.EndHorizontal();
             GUI.DragWindow();
+        }
+
+        private static void RefreshFriends()
+        {
+            if (!SteamSupport.Available || Time.unscaledTime - lastFriendScan < 2f) return;
+            lastFriendScan = Time.unscaledTime;
+            try { friends = SteamSupport.HostingFriends(); } catch { friends.Clear(); }
+            partner = SteamSupport.LastPartner();
         }
 
         private static GUIStyle rich;

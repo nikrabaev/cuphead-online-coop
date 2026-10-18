@@ -18,7 +18,7 @@ namespace CupheadOnline.Net
         bool TryReceive(out byte[] data, out int length);
     }
 
-    /// <summary>Plain UDP. The host binds a port and adopts the first peer that sends a valid hello.</summary>
+    /// <summary>Plain UDP. The host binds a port and adopts the first peer that sends a connect request (Hello).</summary>
     public sealed class UdpTransport : IDatagramTransport
     {
         private readonly Socket socket;
@@ -83,7 +83,7 @@ namespace CupheadOnline.Net
                 if (n <= 0) continue;
                 if (peer == null)
                 {
-                    if (!isHost || !Protocol.IsHello(recvBuffer, n)) continue;
+                    if (!isHost || !Protocol.IsConnectRequest(recvBuffer, n)) continue;
                     peer = from;
                 }
                 else if (!from.Equals(peer))
@@ -138,6 +138,8 @@ namespace CupheadOnline.Net
         }
 
         public static ulong LocalId { get { return SteamUser.GetSteamID().m_SteamID; } }
+
+        public ulong PeerId { get { return hasPeer ? peer.m_SteamID : 0UL; } }
 
         public static SteamTransport Host()
         {
@@ -194,7 +196,7 @@ namespace CupheadOnline.Net
                 if (!SteamNetworking.ReadP2PPacket(recvBuffer, (uint)recvBuffer.Length, out size, out from, Channel)) return false;
                 if (!hasPeer)
                 {
-                    if (!isHost || !Protocol.IsHello(recvBuffer, (int)size)) continue;
+                    if (!isHost || !Protocol.IsConnectRequest(recvBuffer, (int)size)) continue;
                     peer = from;
                     hasPeer = true;
                 }

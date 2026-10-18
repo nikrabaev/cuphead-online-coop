@@ -377,11 +377,19 @@ namespace CupheadOnline.Sync
             if (!__result && TestDriver.KeyboardPulse > 0 && __instance is Rewired.Keyboard) __result = true;
         }
 
-        /// <summary>A network player has no physical controller to lose; never show the reconnect prompt for P2.</summary>
+        /// <summary>
+        /// A network player has no physical controller to lose. P2 counts as disconnected only while their link is
+        /// down: then the game's own "reconnect controller" prompt pauses the host's game (as in couch co-op), and
+        /// it dismisses itself and unpauses once they are back (ControllerDisconnectedPrompt.Update).
+        /// </summary>
         [HarmonyPatch(typeof(PlayerManager), "IsControllerDisconnected"), HarmonyPrefix]
         private static bool IsControllerDisconnected(PlayerId playerId, ref bool __result)
         {
-            if (RemoteInput.DriveHostPlayerTwo && playerId == PlayerId.PlayerTwo) { __result = false; return false; }
+            if (RemoteInput.DriveHostPlayerTwo && playerId == PlayerId.PlayerTwo)
+            {
+                __result = Session.Role == Role.Host && Session.Reconnecting && PlayerManager.Multiplayer;
+                return false;
+            }
             return true;
         }
     }
