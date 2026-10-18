@@ -15,7 +15,7 @@ namespace CupheadOnline
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Guid = "dev.cupheadonline.mod";
-        public const string Version = "0.1.2";
+        public const string Version = "0.1.3";
         /// <summary>Unofficial mod: the name must not suggest it is made or endorsed by Studio MDHR.</summary>
         public const string DisplayName = "Online Co-op for Cuphead (unofficial)";
 
