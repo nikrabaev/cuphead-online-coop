@@ -146,6 +146,7 @@ namespace CupheadOnline.Sync
             foreach (Tracked<SpriteState> t in renderers.Values) t.Visible = false;
             foreach (Tracked<UiState> t in graphics.Values) t.Visible = false;
             cameraIds.Clear();
+            tmpBreaks.Clear();
             NetWriter w = new NetWriter(96);
             w.U16(sceneSerial);
             w.Str(name);
@@ -517,7 +518,7 @@ namespace CupheadOnline.Sync
             {
                 if (string.IsNullOrEmpty(tmp.text)) return false;
                 st.Kind = UiState.KindTmp;
-                st.Text = tmp.text;
+                st.Text = TmpTextWithLineBreaks(tmp);
                 st.Font = Fonts.IdOf(tmp.font);
                 st.FontSize = tmp.fontSize; // converted to screen space below
                 st.Alignment = (byte)Mathf.Clamp(TmpAlignToIndex((int)tmp.alignment), 0, 255);
@@ -534,12 +535,22 @@ namespace CupheadOnline.Sync
                 return false;
             }
 
-            Color c = g.color;
+            // TMP_Text.color hides Graphic.color (it is 'new', not an override): read the colour the text is drawn with.
+            Color c = tmp != null ? tmp.color : g.color;
             // CanvasGroup alpha and CanvasRenderer alpha (CrossFadeAlpha, used for weapon icons and prompts).
             c.a *= GroupAlpha(g.transform) * g.canvasRenderer.GetAlpha();
             if (c.a <= 0.002f) return false;
             st.Color = c;
-            st.Material = g.material != null && g.material != Graphic.defaultGraphicMaterial ? MaterialSync.HostId(g.material) : 0;
+            if (tmp != null)
+            {
+                // TextMesh Pro keeps its own material (a font preset, e.g. the speech bubbles' black face) outside
+                // Graphic.material, which always reports the default UI material for it.
+                st.Material = tmp.fontSharedMaterial != null ? MaterialSync.HostId(tmp.fontSharedMaterial) : 0;
+            }
+            else
+            {
+                st.Material = g.material != null && g.material != Graphic.defaultGraphicMaterial ? MaterialSync.HostId(g.material) : 0;
+            }
 
             g.rectTransform.GetWorldCorners(corners);
             for (int i = 0; i < 4; i++)
@@ -637,6 +648,82 @@ namespace CupheadOnline.Sync
             if (mask != null && mask.MaskEnabled()) return true;
             RectMask2D rect = t.GetComponent<RectMask2D>();
             return rect != null && rect.IsActive();
+        }
+
+        private sealed class TmpBreaks
+        {
+            public string Source;
+            public int Signature;
+            public string Result;
+        }
+
+        private static readonly Dictionary<int, TmpBreaks> tmpBreaks = new Dictionary<int, TmpBreaks>();
+        private static readonly List<int> breakAt = new List<int>();
+        private static int[] bufferToText = new int[256];
+
+        /// <summary>
+        /// The text with a newline wherever the host's TMP wrapped it. The client draws with wrapping off, so its lines
+        /// match even when its layout differs by a pixel (speech bubbles are sized to fit their text exactly).
+        /// </summary>
+        private static string TmpTextWithLineBreaks(TMPro.TextMeshProUGUI tmp)
+        {
+            string text = tmp.text;
+            TMPro.TMP_TextInfo info = tmp.textInfo;
+            if (!tmp.enableWordWrapping || info == null || info.lineCount < 2 || info.characterInfo == null || info.lineInfo == null) return text;
+            int lines = Mathf.Min(info.lineCount, info.lineInfo.Length);
+            breakAt.Clear();
+            int signature = lines;
+            for (int l = 1; l < lines; l++)
+            {
+                int first = info.lineInfo[l].firstCharacterIndex;
+                if (first <= 0 || first >= info.characterCount || first >= info.characterInfo.Length) continue;
+                char previous = info.characterInfo[first - 1].character;
+                if (previous == '\n' || previous == '\r' || previous == '\u2028' || previous == '\u2029') continue; // break already in the text
+                breakAt.Add(info.characterInfo[first].index);
+                signature = signature * 31 + info.characterInfo[first].index;
+            }
+            if (breakAt.Count == 0) return text;
+
+            TmpBreaks cached;
+            int key = tmp.GetInstanceID();
+            if (tmpBreaks.TryGetValue(key, out cached) && ReferenceEquals(cached.Source, text) && cached.Signature == signature) return cached.Result;
+
+            // characterInfo.index points into TMP's parsed char buffer, which folds escapes and surrogate pairs; map it back.
+            if (bufferToText.Length <= text.Length) bufferToText = new int[text.Length + 64];
+            int n = 0;
+            bool ctrl = tmp.parseCtrlCharacters;
+            for (int i = 0; i < text.Length; i++)
+            {
+                bufferToText[n] = i;
+                if (ctrl && text[i] == '\\' && i + 1 < text.Length)
+                {
+                    char c = text[i + 1];
+                    if (c == 'U' && text.Length > i + 9) { i += 9; n++; continue; }
+                    if (c == '\\' && text.Length > i + 2) { bufferToText[n + 1] = i + 2; i += 2; n += 2; continue; }
+                    if (c == 'n' || c == 'r' || c == 't') { i++; n++; continue; }
+                    if (c == 'u' && text.Length > i + 5) { i += 5; n++; continue; }
+                }
+                if (char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1])) i++;
+                n++;
+            }
+
+            System.Text.StringBuilder sb = new System.Text.StringBuilder(text.Length + breakAt.Count);
+            int copied = 0;
+            for (int b = 0; b < breakAt.Count; b++)
+            {
+                int bufferIndex = breakAt[b];
+                if (bufferIndex < 0 || bufferIndex >= n) continue;
+                int at = bufferToText[bufferIndex];
+                if (at < copied) continue;
+                sb.Append(text, copied, at - copied).Append('\n');
+                copied = at;
+            }
+            sb.Append(text, copied, text.Length - copied);
+            if (cached == null) tmpBreaks[key] = cached = new TmpBreaks();
+            cached.Source = text;
+            cached.Signature = signature;
+            cached.Result = sb.ToString();
+            return cached.Result;
         }
 
         /// <summary>TextAlignmentOptions are bit flags; map to a compact 0..N index understood by both sides.</summary>

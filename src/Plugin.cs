@@ -151,6 +151,11 @@ namespace CupheadOnline
             }
         }
 
+        private void LateUpdate()
+        {
+            Overlay.UpdateCursor();
+        }
+
         private void OnGUI()
         {
             Overlay.Draw();

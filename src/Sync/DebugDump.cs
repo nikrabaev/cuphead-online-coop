@@ -49,6 +49,14 @@ namespace CupheadOnline.Sync
                         g.GetType().Name, Path(g.transform), g.enabled, img != null && img.sprite != null ? img.sprite.name : "-", img != null && img.overrideSprite != null ? img.overrideSprite.name : "-",
                         g.material != null ? g.material.name + "/" + (g.material.shader != null ? g.material.shader.name : "") : "-", g.color, c[0], c[2], g.canvasRenderer.cull,
                         tex != null ? tex.name + " " + tex.width + "x" + tex.height : "null", img != null && img.overrideSprite != null ? img.overrideSprite.packed.ToString() : "-"));
+                    TMPro.TextMeshProUGUI tmp = g as TMPro.TextMeshProUGUI;
+                    if (tmp != null)
+                    {
+                        // TMP_Text.color hides Graphic.color, and its font material is not Graphic.material.
+                        Material fm = tmp.fontSharedMaterial;
+                        sb.AppendLine(string.Format("    TMP color={0} font={1} fontMat={2} face={3} wrap={4} lines={5}",
+                            tmp.color, tmp.font != null ? tmp.font.name : "-", fm != null ? fm.name : "-", tmp.faceColor, tmp.enableWordWrapping, tmp.textInfo != null ? tmp.textInfo.lineCount : 0));
+                    }
                 }
             }
             Plugin.Log.LogInfo(sb.ToString());

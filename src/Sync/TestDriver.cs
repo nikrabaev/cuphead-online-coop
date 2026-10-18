@@ -335,7 +335,8 @@ namespace CupheadOnline.Sync
 
         private static string State()
         {
-            string s = "scene=" + SceneManager.GetActiveScene().name + " loading=" + SceneLoader.CurrentlyLoading + " paused=" + PauseManager.state;
+            string s = "scene=" + SceneManager.GetActiveScene().name + " loading=" + SceneLoader.CurrentlyLoading + " paused=" + PauseManager.state +
+                " menu=" + CupheadOnline.UI.Overlay.Visible + " cursor=" + Cursor.visible + "/" + Cursor.lockState;
             if (Session.Role == Role.Client) return s + " " + ClientMirror.Summary();
             s += " multiplayer=" + PlayerManager.Multiplayer;
             for (int i = 0; i < 2; i++)

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using CupheadOnline.Net;
+using HarmonyLib;
 using UnityEngine;
 
 namespace CupheadOnline.UI
@@ -8,7 +10,7 @@ namespace CupheadOnline.UI
     /// <summary>IMGUI menu (F8). Uses UnityEngine.Input/IMGUI, so it keeps working while Rewired input is blocked.</summary>
     public static class Overlay
     {
-        public static bool Visible = true;
+        public static bool Visible;
         private static Rect window = new Rect(40, 40, 460, 10);
         private static string address;
         private static string steamId;
@@ -21,6 +23,21 @@ namespace CupheadOnline.UI
         private static float lastRateSample;
         private static float upKbps, downKbps;
 
+        /// <summary>
+        /// Cuphead.Update hides the OS cursor every frame in fullscreen (Cursor.visible = !Screen.fullScreen).
+        /// CursorPatch routes that assignment here so the cursor stays visible while the menu is open.
+        /// </summary>
+        public static void SetGameCursorVisible(bool visible)
+        {
+            Cursor.visible = visible || Visible;
+        }
+
+        /// <summary>Fallback for game builds the patch does not match: re-show the cursor after the game hid it.</summary>
+        public static void UpdateCursor()
+        {
+            if (Visible && !Cursor.visible) Cursor.visible = true;
+        }
+
         public static void Draw()
         {
             if (address == null)
@@ -28,7 +45,6 @@ namespace CupheadOnline.UI
                 address = Plugin.LastAddress.Value;
                 steamId = Plugin.LastSteamId.Value;
                 portText = Plugin.Port.Value.ToString();
-                Visible = false;
             }
             SampleRates();
             DrawBadge();
@@ -221,6 +237,21 @@ namespace CupheadOnline.UI
             {
                 error = ex.Message;
                 Plugin.Log.LogError(ex);
+            }
+        }
+    }
+
+    [HarmonyPatch(typeof(Cuphead), "Update")]
+    internal static class CursorPatch
+    {
+        private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            MethodInfo setVisible = AccessTools.PropertySetter(typeof(Cursor), "visible");
+            MethodInfo replacement = AccessTools.Method(typeof(Overlay), "SetGameCursorVisible");
+            foreach (CodeInstruction ci in instructions)
+            {
+                if (ci.Calls(setVisible)) ci.operand = replacement;
+                yield return ci;
             }
         }
     }

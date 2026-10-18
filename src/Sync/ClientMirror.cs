@@ -804,7 +804,7 @@ namespace CupheadOnline.Sync
                     case UiState.KindTmp:
                         TMPro.TextMeshProUGUI tmp = g.Go.AddComponent<TMPro.TextMeshProUGUI>();
                         tmp.raycastTarget = false;
-                        tmp.enableWordWrapping = true;
+                        tmp.enableWordWrapping = false; // the host sends its line breaks in the text
                         g.G = tmp;
                         break;
                     default:
@@ -835,8 +835,19 @@ namespace CupheadOnline.Sync
                     m = null;
                     color = new Color(Mathf.Clamp01(color.r * 2f), Mathf.Clamp01(color.g * 2f), Mathf.Clamp01(color.b * 2f), color.a);
                 }
-                g.G.material = m;
-                g.G.color = color;
+                TMPro.TextMeshProUGUI tmp = g.G as TMPro.TextMeshProUGUI;
+                if (tmp != null)
+                {
+                    // Without the host's preset (or with an unresolved one lacking the font atlas) use the font's own.
+                    if (m == null || m.mainTexture == null) m = tmp.font != null ? tmp.font.material : null;
+                    if (m != null) tmp.fontSharedMaterial = m;
+                    tmp.color = color; // TMP_Text.color hides Graphic.color
+                }
+                else
+                {
+                    g.G.material = m;
+                    g.G.color = color;
+                }
             }
             Image image = g.G as Image;
             if (image != null)
